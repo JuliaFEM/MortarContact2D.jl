@@ -3,8 +3,10 @@
 
 using Documenter, MortarContact2D
 
+format = length(ARGS) > 0 ? Symbol(ARGS[1]) : :html
+
 makedocs(modules=[MortarContact2D],
-         format = :html,
+         format = format,
          checkdocs = :all,
          sitename = "MortarContact2D.jl",
          pages = ["index.md"]

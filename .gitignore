@@ -3,3 +3,4 @@ docs/site/
 *.cov
 *.pyc
 *.swp
+.ipynb_checkpoints

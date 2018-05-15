@@ -16,15 +16,7 @@ using Reexport
 @reexport using FEMBase
 
 include("mortar2d.jl")
-
-export Mortar2D
-export add_slave_elements!, add_master_elements!
-export get_slave_elements, get_master_elements
-export get_slave_dofs, get_master_dofs
-export get_mortar_matrix_D, get_mortar_matrix_M, get_mortar_matrix_P
-
 include("contact2d.jl")
-
-export Contact2D
+export Mortar2D, Contact2D
 
 end

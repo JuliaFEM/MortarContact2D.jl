@@ -4,7 +4,9 @@
 # Simple coupling interface of four elements
 
 using MortarContact2D
-using MortarContact2D: get_slave_dofs, get_master_dofs
+using MortarContact2D: get_slave_dofs, get_master_dofs,
+                       get_mortar_matrix_D, get_mortar_matrix_M,
+                       get_mortar_matrix_P
 using Base.Test
 
 #' Slave side coordinates:

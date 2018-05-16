@@ -1,10 +1,10 @@
 # This file is a part of JuliaFEM.
 # License is MIT: see https://github.com/JuliaFEM/MortarContact2D.jl/blob/master/LICENSE
 
-#' Simple coupling interface of four elements
+# Simple coupling interface of four elements
 
 using MortarContact2D
-using MortarContact2D: get_slave_dofs
+using MortarContact2D: get_slave_dofs, get_master_dofs
 using Base.Test
 
 #' Slave side coordinates:

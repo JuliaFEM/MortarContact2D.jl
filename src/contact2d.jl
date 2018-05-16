@@ -15,36 +15,33 @@ function Contact2D()
     return Contact2D([], false, true, Inf, 0, :AUTO, [])
 end
 
-import FEMBase: get_unknown_field_name, assemble_elements!, add_elements!,
-                get_elements, update!
-
-function add_elements!(::Problem{Contact2D}, ::Any)
+function FEMBase.add_elements!(::Problem{Contact2D}, ::Any)
     error("use `add_slave_elements!` and `add_master_elements!` to add ",
           "elements to the Contact2D problem.")
 end
 
-function add_slave_elements!(problem::Problem{Contact2D}, elements)
+function FEMBase.get_elements(problem::Problem{Contact2D})
+    return [problem.elements; problem.properties.master_elements]
+end
+
+function FEMBase.add_slave_elements!(problem::Problem{Contact2D}, elements)
     for element in elements
         push!(problem.elements, element)
     end
 end
 
-function add_master_elements!(problem::Problem{Contact2D}, elements)
+function FEMBase.add_master_elements!(problem::Problem{Contact2D}, elements)
     for element in elements
         push!(problem.properties.master_elements, element)
     end
 end
 
-function get_slave_elements(problem::Problem{Contact2D})
+function FEMBase.get_slave_elements(problem::Problem{Contact2D})
     return problem.elements
 end
 
-function get_master_elements(problem::Problem{Contact2D})
+function FEMBase.get_master_elements(problem::Problem{Contact2D})
     return problem.properties.master_elements
-end
-
-function get_elements(problem::Problem{Contact2D})
-    return [problem.elements; problem.properties.master_elements]
 end
 
 function get_slave_dofs(problem::Problem{Contact2D})
@@ -115,8 +112,8 @@ function create_contact_segmentation(problem::Problem{Contact2D}, slave_element:
     return result
 end
 
-function assemble_elements!(problem::Problem{Contact2D}, assembly::Assembly,
-                            elements::Vector{Element{Seg2}}, time::Float64)
+function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assembly,
+                                    elements::Vector{Element{Seg2}}, time::Float64)
 
     props = problem.properties
     props.iteration += 1

@@ -1,10 +1,6 @@
 # This file is a part of JuliaFEM.
 # License is MIT: see https://github.com/JuliaFEM/MortarContact2D.jl/blob/master/LICENSE
 
-using FEMBase
-
-import FEMBase: get_unknown_field_name, assemble_elements!, add_elements!
-
 const MortarElements2D = Union{Seg2,Seg3}
 
 type Mortar2D <: BoundaryProblem
@@ -15,28 +11,28 @@ function Mortar2D()
     return Mortar2D([])
 end
 
-function add_elements!(::Problem{Mortar2D}, ::Any)
+function FEMBase.add_elements!(::Problem{Mortar2D}, ::Any)
     error("use `add_slave_elements!` and `add_master_elements!` to add ",
           "elements to the Mortar2D problem.")
 end
 
-function add_slave_elements!(problem::Problem{Mortar2D}, elements)
+function FEMBase.add_slave_elements!(problem::Problem{Mortar2D}, elements)
     for element in elements
         push!(problem.elements, element)
     end
 end
 
-function add_master_elements!(problem::Problem{Mortar2D}, elements)
+function FEMBase.add_master_elements!(problem::Problem{Mortar2D}, elements)
     for element in elements
         push!(problem.properties.master_elements, element)
     end
 end
 
-function get_slave_elements(problem::Problem{Mortar2D})
+function FEMBase.get_slave_elements(problem::Problem{Mortar2D})
     return problem.elements
 end
 
-function get_master_elements(problem::Problem{Mortar2D})
+function FEMBase.get_master_elements(problem::Problem{Mortar2D})
     return problem.properties.master_elements
 end
 
@@ -157,8 +153,8 @@ function calculate_normals!(elements, time, ::Type{Val{1}}; rotate_normals=false
 end
 
 
-function assemble_elements!(problem::Problem{Mortar2D}, assembly::Assembly,
-                            elements::Vector{Element{Seg2}}, time::Float64)
+function FEMBase.assemble_elements!(problem::Problem{Mortar2D}, assembly::Assembly,
+                                    elements::Vector{Element{Seg2}}, time::Float64)
 
     slave_elements = get_slave_elements(problem)
 
@@ -259,10 +255,11 @@ function get_mortar_matrix_P(problem::Problem{Mortar2D})
     return P
 end
 
-""" Eliminate mesh tie constraints from matrices K, M. """
-function eliminate_boundary_conditions!(problem::Problem{Mortar2D},
-                                        K::SparseMatrixCSC,
-                                        M::SparseMatrixCSC)
+""" Eliminate mesh tie constraints from matrices K, M, f. """
+function FEMBase.eliminate_boundary_conditions!(problem::Problem{Mortar2D},
+                                                K::SparseMatrixCSC,
+                                                M::SparseMatrixCSC,
+                                                f::SparseVector)
 
     m = get_master_dofs(problem)
     s = get_slave_dofs(problem)

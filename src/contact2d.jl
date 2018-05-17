@@ -123,9 +123,9 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
     field_dim = get_unknown_field_dimension(problem)
     field_name = get_parent_field_name(problem)
 
-    # 1. calculate nodal normals and tangents for slave element nodes j ∈ S
-    normals, tangents = calculate_normals(slave_elements, time, Val{1};
-                        rotate_normals=props.rotate_normals)
+    # 1. calculate nodal normals for slave element nodes j ∈ S
+    normals = calculate_normals([slave_elements...], time; rotate_normals=props.rotate_normals)
+    tangents = Dict(j => [t2, -t1] for (j, (t1,t2)) in normals)
     update!(slave_elements, "normal", time => normals)
     update!(slave_elements, "tangent", time => tangents)
 
@@ -144,7 +144,7 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
         x1 = map(+, X1, u1)
         la1 = slave_element("lambda", time)
         n1 = slave_element("normal", time)
-        t1 = slave_element("tangent", time)
+        t1 = [n1[2], -n1[1]]
 
         contact_area = 0.0
         contact_error = 0.0

@@ -116,7 +116,7 @@ function project_from_slave_to_master(master_element::Element{E}, x1, n1, time;
 end
 
 
-function calculate_normals(elements::Vector{Element{Seg2}}, time)
+function calculate_normals(elements::Vector{Element{Seg2}}, time; rotate_normals=false)
 
     normals = Dict{Int64, Vector{Float64}}()
 
@@ -129,8 +129,9 @@ function calculate_normals(elements::Vector{Element{Seg2}}, time)
         end
     end
 
+    s = rotate_normals ? -1.0 : 1.0
     for j in keys(normals)
-        normals[j] /= norm(normals[j])
+        normals[j] = s*normals[j]/norm(normals[j])
     end
 
     return normals

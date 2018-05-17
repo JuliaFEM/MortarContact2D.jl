@@ -52,104 +52,88 @@ function get_master_dofs(problem::Problem{Mortar2D})
     return sort(unique(dofs))
 end
 
-function newton(f, df, x; tol=1.0e-6, max_iterations=10)
-    for i=1:max_iterations
-        dx = -f(x)/df(x)
-        x += dx
-        if norm(dx) < tol
-            return x
-        end
-    end
-    error("Newton iteration did not converge in $max_iterations iterations")
-end
+function project_from_master_to_slave(slave_element::Element{E}, x2, time;
+    tol=1.0e-9, max_iterations=5) where {E<:MortarElements2D}
 
-function cross2(a, b)
-    cross([a; 0], [b; 0])[3]
-end
-
-function project_from_master_to_slave{E<:MortarElements2D}(slave_element::Element{E}, x2, time)
     x1_ = slave_element("geometry", time)
     n1_ = slave_element("normal", time)
+    cross2(a, b) = cross([a; 0.0], [b; 0.0])[3]
     x1(xi1) = interpolate(vec(get_basis(slave_element, [xi1], time)), x1_)
     dx1(xi1) = interpolate(vec(get_dbasis(slave_element, [xi1], time)), x1_)
     n1(xi1) = interpolate(vec(get_basis(slave_element, [xi1], time)), n1_)
     dn1(xi1) = interpolate(vec(get_dbasis(slave_element, [xi1], time)), n1_)
     R(xi1) = cross2(x1(xi1)-x2, n1(xi1))
     dR(xi1) = cross2(dx1(xi1), n1(xi1)) + cross2(x1(xi1)-x2, dn1(xi1))
-    xi1 = nothing
-    try
-        xi1 = newton(R, dR, 0.0)
-    catch
-        warn("projection from master to slave failed with following arguments:")
-        warn("slave element x1: $x1_")
-        warn("slave element n1: $n1_")
-        warn("master element x2: $x2")
-        warn("time: $time")
-        len = norm(x1_[2] - x1_[1])
-        midpnt = mean(x1_)
-        dist = norm(midpnt - x2)
-        distval = dist/len
-        warn("midpoint of slave element: $midpnt")
-        warn("length of slave element: $len")
-        warn("distance between midpoint of slave element and x2: $dist")
-        warn("charasteristic measure: $distval")
-        rethrow()
+
+    xi1 = 0.0
+    dxi1 = 0.0
+    for i=1:max_iterations
+        dxi1 = -R(xi1)/dR(xi1)
+        xi1 += dxi1
+        if norm(dxi1) < tol
+            return xi1
+        end
     end
-    return xi1
+
+    len = norm(x1_[2] - x1_[1])
+    midpnt = mean(x1_)
+    dist = norm(midpnt - x2)
+    distval = dist/len
+    info("Projection from the master element to the slave failed.")
+    info("Arguments:")
+    info("Time: $time")
+    info("Point to project to the slave element: (x2): $x2")
+    info("Slave element geometry (x1): $x1_")
+    info("Slave element normal direction (n1): $n1_")
+    info("Midpoint of slave element: $midpnt")
+    info("Length of slave element: $len")
+    info("Distance between midpoint of slave element and x2: $dist")
+    info("Distance/Lenght-ratio: $distval")
+    info("Number of iterations: $max_iterations")
+    info("Wanted convergence tolerance: $tol")
+    info("Achieved convergence tolerance: $(norm(dxi1))")
+    error("Failed to project point to slave surface in $max_iterations.")
 end
 
-function project_from_slave_to_master{E<:MortarElements2D}(master_element::Element{E}, x1, n1, time)
+function project_from_slave_to_master(master_element::Element{E}, x1, n1, time;
+    max_iterations=5, tol=1.0e-9) where {E<:MortarElements2D}
     x2_ = master_element("geometry", time)
     x2(xi2) = interpolate(vec(get_basis(master_element, [xi2], time)), x2_)
     dx2(xi2) = interpolate(vec(get_dbasis(master_element, [xi2], time)), x2_)
     cross2(a, b) = cross([a; 0], [b; 0])[3]
     R(xi2) = cross2(x2(xi2)-x1, n1)
     dR(xi2) = cross2(dx2(xi2), n1)
-    xi2 = newton(R, dR, 0.0)
-    return xi2
-end
-
-function calculate_normals(elements, time, ::Type{Val{1}}; rotate_normals=false)
-    tangents = Dict{Int64, Vector{Float64}}()
-    for element in elements
-        conn = get_connectivity(element)
-        #X1 = element("geometry", time)
-        #dN = get_dbasis(element, [0.0], time)
-        #tangent = vec(sum([kron(dN[:,i], X1[i]') for i=1:length(X1)]))
-        tangent = vec(element([0.0], time, Val{:Jacobian}))
-        for nid in conn
-            if haskey(tangents, nid)
-                tangents[nid] += tangent
-            else
-                tangents[nid] = tangent
-            end
+    xi2 = 0.0
+    dxi2 = 0.0
+    for i=1:max_iterations
+        dxi2 = -R(xi2)/dR(xi2)
+        xi2 += dxi2
+        if norm(dxi2) < tol
+            return xi2
         end
     end
+    error("Failed to project point to master surface in $max_iterations.")
+end
 
-    Q = [0.0 -1.0; 1.0 0.0]
+
+function calculate_normals(elements::Vector{Element{Seg2}}, time)
+
     normals = Dict{Int64, Vector{Float64}}()
-    S = collect(keys(tangents))
-    for j in S
-        tangents[j] /= norm(tangents[j])
-        normals[j] = Q*tangents[j]
-    end
 
-    if rotate_normals
-        for j in S
-            normals[j] = -normals[j]
+    for element in elements
+        X1, X2 = element("geometry", time)
+        t1, t2 = (X2-X1)/norm(X2-X1)
+        normal = [-t2, t1]
+        for j in get_connectivity(element)
+            normals[j] = get(normals, j, zeros(2)) + normal
         end
     end
 
-    return normals, tangents
-end
-
-function calculate_normals!(elements, time, ::Type{Val{1}}; rotate_normals=false)
-    normals, tangents = calculate_normals(elements, time, Val{1}; rotate_normals=rotate_normals)
-    for element in elements
-        conn = get_connectivity(element)
-        update!(element, "normal", time => [normals[j] for j in conn])
-        update!(element, "tangent", time => [tangents[j] for j in conn])
+    for j in keys(normals)
+        normals[j] /= norm(normals[j])
     end
+
+    return normals
 end
 
 
@@ -162,11 +146,9 @@ function FEMBase.assemble_elements!(problem::Problem{Mortar2D}, assembly::Assemb
     field_dim = get_unknown_field_dimension(problem)
     field_name = get_parent_field_name(problem)
 
-    # 1. calculate nodal normals and tangents for slave element nodes j ∈ S
-    normals, tangents = calculate_normals(slave_elements, time, Val{1};
-                                          rotate_normals=false)
+    # 1. calculate nodal normals for slave element nodes j ∈ S
+    normals = calculate_normals([slave_elements...], time)
     update!(slave_elements, "normal", time => normals)
-    update!(slave_elements, "tangent", time => tangents)
 
     # 2. loop all slave elements
     for slave_element in slave_elements
@@ -256,10 +238,7 @@ function get_mortar_matrix_P(problem::Problem{Mortar2D})
 end
 
 """ Eliminate mesh tie constraints from matrices K, M, f. """
-function FEMBase.eliminate_boundary_conditions!(problem::Problem{Mortar2D},
-                                                K::SparseMatrixCSC,
-                                                M::SparseMatrixCSC,
-                                                f::SparseVector)
+function FEMBase.eliminate_boundary_conditions!(problem::Problem{Mortar2D}, K, M, f)
 
     m = get_master_dofs(problem)
     s = get_slave_dofs(problem)
@@ -269,8 +248,9 @@ function FEMBase.eliminate_boundary_conditions!(problem::Problem{Mortar2D},
     Id[s] = 0.0
     Q = spdiagm(Id)
     Q[m,s] += P'
-    K[:,:] = Q*K_red*Q'
-    M[:,:] = Q*M_red*Q'
+    K[:,:] = Q*K*Q'
+    M[:,:] = Q*M*Q'
+    f[:] = Q*f
 
     return true
 end

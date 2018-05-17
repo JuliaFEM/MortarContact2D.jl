@@ -81,27 +81,33 @@ function create_contact_segmentation(problem::Problem{Contact2D}, slave_element:
     x1 = slave_element("geometry", time)
 
     if deformed && haskey(slave_element, "displacement")
-        x1 += slave_element("displacement", time)
+        x1 = map(+, x1, slave_element("displacement", time))
     end
+
+    slave_midpoint = 1/2*(x1[1] + x1[2])
+    slave_length = norm(x1[2]-x1[1])
 
     for master_element in master_elements
 
         x2 = master_element("geometry", time)
 
         if deformed && haskey(master_element, "displacement")
-            x2 += master_element("displacement", time)
+            x2 = map(+, x2, master_element("displacement", time))
         end
 
-        if norm(mean(x1) - x2[1]) / norm(x1[2] - x1[1]) > max_distance
-            continue
-        end
-        if norm(mean(x1) - x2[2]) / norm(x1[2] - x1[1]) > max_distance
+        master_midpoint = 1/2*(x2[1] + x2[2])
+        master_length = norm(x2[2]-x2[1])
+        # charasteristic length
+        dist = norm(slave_midpoint - master_midpoint)
+        cl = dist/max(slave_length, master_length)
+        if cl > max_distance
             continue
         end
 
         # 3.1 calculate segmentation
-        xi1a = project_from_master_to_slave(slave_element, x2[1], time)
-        xi1b = project_from_master_to_slave(slave_element, x2[2], time)
+        x21, x22 = x2
+        xi1a = project_from_master_to_slave(slave_element, x21, time)
+        xi1b = project_from_master_to_slave(slave_element, x22, time)
         xi1 = clamp.([xi1a; xi1b], -1.0, 1.0)
         l = 1/2*abs(xi1[2]-xi1[1])
         if isapprox(l, 0.0)
@@ -123,9 +129,9 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
     field_dim = get_unknown_field_dimension(problem)
     field_name = get_parent_field_name(problem)
 
-    # 1. calculate nodal normals and tangents for slave element nodes j ∈ S
-    normals, tangents = calculate_normals(slave_elements, time, Val{1};
-                        rotate_normals=props.rotate_normals)
+    # 1. calculate nodal normals for slave element nodes j ∈ S
+    normals = calculate_normals([slave_elements...], time; rotate_normals=props.rotate_normals)
+    tangents = Dict(j => [t2, -t1] for (j, (t1,t2)) in normals)
     update!(slave_elements, "normal", time => normals)
     update!(slave_elements, "tangent", time => tangents)
 
@@ -136,15 +142,14 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
         nsl = length(slave_element)
         X1 = slave_element("geometry", time)
+        x1 = slave_element("geometry", time)
         if haskey(slave_element, "displacement")
             u1 = slave_element("displacement", time)
-        else
-            u1 = (zeros(2), zeros(2))
+            x1 = map(+, x1, u1)
         end
-        x1 = map(+, X1, u1)
         la1 = slave_element("lambda", time)
         n1 = slave_element("normal", time)
-        t1 = slave_element("tangent", time)
+        t1 = [n1[2], -n1[1]]
 
         contact_area = 0.0
         contact_error = 0.0
@@ -179,12 +184,11 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
             nm = length(master_element)
             X2 = master_element("geometry", time)
+            x2 = master_element("geometry", time)
             if haskey(master_element, "displacement")
                 u2 = master_element("displacement", time)
-            else
-                u2 = (zeros(2), zeros(2))
+                x2 = map(+, x2, u2)
             end
-            x2 = map(+, X2, u2)
 
             # 3.3. loop integration points of one integration segment and calculate
             # local mortar matrices
@@ -277,7 +281,8 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
     la = problem.assembly.la
     # FIXME: for matrix operations, we need to know the dimensions of the
     # final matrices
-    ndofs = 0
+    ndofs = 2*length(S)
+    ndofs = max(ndofs, length(la))
     ndofs = max(ndofs, size(problem.assembly.K, 2))
     ndofs = max(ndofs, size(problem.assembly.C1, 2))
     ndofs = max(ndofs, size(problem.assembly.C2, 2))
@@ -380,9 +385,9 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
         update!(slave_elements, "slip nodes", time => is_slip)
     end
 
-    info("# | active | inactive | stick | slip | gap | pres | comp")
+    info("# | A | I | St | Sl | gap | pres | comp")
     for j in S
-        str1 = "$j | $(is_active[j]) | $(is_inactive[j]) | $(is_stick[j]) | $(is_slip[j]) | "
+        str1 = "$j | $(is_active[j]) | $(is_inactive[j]) |  $(is_stick[j]) |  $(is_slip[j]) | "
         str2 = "$(round(weighted_gap[j][1], 3)) | $(round(contact_pressure[j][1], 3)) | $(round(complementarity_condition[j][1], 3))"
         info(str1 * str2)
     end

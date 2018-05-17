@@ -2,6 +2,7 @@
 # License is MIT: see https://github.com/JuliaFEM/MortarContact2D.jl/blob/master/LICENSE
 
 using MortarContact2D
+using MortarContact2D: get_slave_dofs, get_master_dofs
 using Base.Test
 
 # Original problem:
@@ -127,3 +128,7 @@ g_expected = zeros(4)
 @test isapprox(C2, C2_expected)
 @test isapprox(D, D_expected)
 @test isapprox(g, g_expected; atol=1.0e-12)
+
+@test_throws Exception add_elements!(problem, [slave])
+@test get_slave_dofs(problem) == [1, 2, 3, 4]
+@test get_master_dofs(problem) == [5, 6, 7, 8]

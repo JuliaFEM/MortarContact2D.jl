@@ -78,3 +78,4 @@ xi = project_from_slave_to_master(mel1, X1, n1, 0.0)
 @test isapprox(xi, -1.0)
 
 @test_throws Exception project_from_master_to_slave(sel1, [0.0, 0.0], 0.0; tol=0.0)
+@test_throws Exception project_from_slave_to_master(mel1, [0.0, 1.0], [-1.0, 0.0], 0.0; tol=0.0)

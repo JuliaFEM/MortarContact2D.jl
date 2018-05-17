@@ -6,6 +6,10 @@ using Base.Test
 
 @testset "test MortarContact2D.jl" begin
 
+    @testset "Projecting vertices between surfaces" begin
+        include("test_mortar2d_calculate_projection.jl")
+    end
+
     @testset "Mortar coupling, example 1" begin
         include("test_mortar2d_ex1.jl")
     end

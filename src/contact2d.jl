@@ -142,12 +142,11 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
         nsl = length(slave_element)
         X1 = slave_element("geometry", time)
+        x1 = slave_element("geometry", time)
         if haskey(slave_element, "displacement")
             u1 = slave_element("displacement", time)
-        else
-            u1 = (zeros(2), zeros(2))
+            x1 = map(+, x1, u1)
         end
-        x1 = map(+, X1, u1)
         la1 = slave_element("lambda", time)
         n1 = slave_element("normal", time)
         t1 = [n1[2], -n1[1]]
@@ -185,12 +184,11 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
             nm = length(master_element)
             X2 = master_element("geometry", time)
+            x2 = master_element("geometry", time)
             if haskey(master_element, "displacement")
                 u2 = master_element("displacement", time)
-            else
-                u2 = (zeros(2), zeros(2))
+                x2 = map(+, x2, u2)
             end
-            x2 = map(+, X2, u2)
 
             # 3.3. loop integration points of one integration segment and calculate
             # local mortar matrices

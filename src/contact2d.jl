@@ -385,9 +385,9 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
         update!(slave_elements, "slip nodes", time => is_slip)
     end
 
-    info("# | active | inactive | stick | slip | gap | pres | comp")
+    info("# | A | I | St | Sl | gap | pres | comp")
     for j in S
-        str1 = "$j | $(is_active[j]) | $(is_inactive[j]) | $(is_stick[j]) | $(is_slip[j]) | "
+        str1 = "$j | $(is_active[j]) | $(is_inactive[j]) |  $(is_stick[j]) |  $(is_slip[j]) | "
         str2 = "$(round(weighted_gap[j][1], 3)) | $(round(contact_pressure[j][1], 3)) | $(round(complementarity_condition[j][1], 3))"
         info(str1 * str2)
     end

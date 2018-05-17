@@ -112,7 +112,7 @@ function project_from_slave_to_master(master_element::Element{E}, x1, n1, time;
             return xi2
         end
     end
-    error("Failed to project point to master surface in $max_iterations.")
+    error("Failed to project point to master surface in $max_iterations iterations.")
 end
 
 

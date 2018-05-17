@@ -81,27 +81,33 @@ function create_contact_segmentation(problem::Problem{Contact2D}, slave_element:
     x1 = slave_element("geometry", time)
 
     if deformed && haskey(slave_element, "displacement")
-        x1 += slave_element("displacement", time)
+        x1 = map(+, x1, slave_element("displacement", time))
     end
+
+    slave_midpoint = 1/2*(x1[1] + x1[2])
+    slave_length = norm(x1[2]-x1[1])
 
     for master_element in master_elements
 
         x2 = master_element("geometry", time)
 
         if deformed && haskey(master_element, "displacement")
-            x2 += master_element("displacement", time)
+            x2 = map(+, x2, master_element("displacement", time))
         end
 
-        if norm(mean(x1) - x2[1]) / norm(x1[2] - x1[1]) > max_distance
-            continue
-        end
-        if norm(mean(x1) - x2[2]) / norm(x1[2] - x1[1]) > max_distance
+        master_midpoint = 1/2*(x2[1] + x2[2])
+        master_length = norm(x2[2]-x2[1])
+        # charasteristic length
+        dist = norm(slave_midpoint - master_midpoint)
+        cl = dist/max(slave_length, master_length)
+        if cl > max_distance
             continue
         end
 
         # 3.1 calculate segmentation
-        xi1a = project_from_master_to_slave(slave_element, x2[1], time)
-        xi1b = project_from_master_to_slave(slave_element, x2[2], time)
+        x21, x22 = x2
+        xi1a = project_from_master_to_slave(slave_element, x21, time)
+        xi1b = project_from_master_to_slave(slave_element, x22, time)
         xi1 = clamp.([xi1a; xi1b], -1.0, 1.0)
         l = 1/2*abs(xi1[2]-xi1[1])
         if isapprox(l, 0.0)
@@ -277,7 +283,8 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
     la = problem.assembly.la
     # FIXME: for matrix operations, we need to know the dimensions of the
     # final matrices
-    ndofs = 0
+    ndofs = 2*length(S)
+    ndofs = max(ndofs, length(la))
     ndofs = max(ndofs, size(problem.assembly.K, 2))
     ndofs = max(ndofs, size(problem.assembly.C1, 2))
     ndofs = max(ndofs, size(problem.assembly.C2, 2))

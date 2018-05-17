@@ -22,4 +22,8 @@ using Base.Test
         include("test_contact2d.jl")
     end
 
+    @testset "Testing contact segmentation" begin
+        include("test_contact_segmentation.jl")
+    end
+
 end

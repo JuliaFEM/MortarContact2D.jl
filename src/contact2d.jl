@@ -60,6 +60,22 @@ function get_master_dofs(problem::Problem{Contact2D})
     return sort(unique(dofs))
 end
 
+function get_slave_nodes(problem::Problem{Contact2D})
+    nodes = Int64[]
+    for element in get_slave_elements(problem)
+        append!(nodes, get_connectivity(element))
+    end
+    return sort(unique(nodes))
+end
+
+function get_master_nodes(problem::Problem{Contact2D})
+    nodes = Int64[]
+    for element in get_master_elements(problem)
+        append!(nodes, get_connectivity(element))
+    end
+    return sort(unique(nodes))
+end
+
 function create_rotation_matrix(element::Element{Seg2}, time::Float64)
     n = element("normal", time)
     R = [0.0 -1.0; 1.0 0.0]
@@ -72,7 +88,10 @@ function create_rotation_matrix(element::Element{Seg2}, time::Float64)
     return Q
 end
 
-function create_contact_segmentation(problem::Problem{Contact2D}, slave_element::Element{Seg2}, master_elements::Vector, time::Float64; deformed=false)
+function create_contact_segmentation(problem::Problem{Contact2D},
+                                     slave_element::Element{Seg2},
+                                     master_elements::Vector,
+                                     time::Float64; deformed=false)
 
     result = []
 
@@ -269,69 +288,39 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
     end # slave elements done, contact virtual work ready
 
-    S = sort(collect(keys(normals))) # slave element nodes
+    S = get_slave_nodes(problem)
+    n = maximum(get_slave_dofs(problem))
+    m = maximum(get_master_dofs(problem))
     weighted_gap = Dict{Int64, Vector{Float64}}()
     contact_pressure = Dict{Int64, Vector{Float64}}()
     complementarity_condition = Dict{Int64, Vector{Float64}}()
-    is_active = Dict{Int64, Int}()
-    is_inactive = Dict{Int64, Int}()
-    is_slip = Dict{Int64, Int}()
-    is_stick = Dict{Int64, Int}()
+    is_active = Dict{Int64, Int64}()
+    is_inactive = Dict{Int64, Int64}()
+    is_slip = Dict{Int64, Int64}()
+    is_stick = Dict{Int64, Int64}()
 
-    la = problem.assembly.la
-    # FIXME: for matrix operations, we need to know the dimensions of the
-    # final matrices
-    ndofs = 2*length(S)
-    ndofs = max(ndofs, length(la))
-    ndofs = max(ndofs, size(problem.assembly.K, 2))
-    ndofs = max(ndofs, size(problem.assembly.C1, 2))
-    ndofs = max(ndofs, size(problem.assembly.C2, 2))
-    ndofs = max(ndofs, size(problem.assembly.D, 2))
-    ndofs = max(ndofs, size(problem.assembly.g, 2))
-    ndofs = max(ndofs, size(problem.assembly.c, 2))
-
+    ndofs = max(n, m)
     C1 = sparse(problem.assembly.C1, ndofs, ndofs)
     C2 = sparse(problem.assembly.C2, ndofs, ndofs)
     D = sparse(problem.assembly.D, ndofs, ndofs)
     g = full(problem.assembly.g, ndofs, 1)
     c = full(problem.assembly.c, ndofs, 1)
 
+    # determine weighted gap, contact pressure and complementarity condition
+    # in normal direction for each node j in S.
+    la = problem("lambda", time)
     for j in S
         dofs = [2*(j-1)+1, 2*(j-1)+2]
         weighted_gap[j] = g[dofs]
-    end
-
-    state = problem.properties.contact_state_in_first_iteration
-    if problem.properties.iteration == 1
-        info("First contact iteration, initial contact state = $state")
-
-        if state == :AUTO
-            avg_gap = mean([weighted_gap[j][1] for j in S])
-            std_gap = std([weighted_gap[j][1] for j in S])
-            if (avg_gap < 1.0e-12) && (std_gap < 1.0e-12)
-                state = :ACTIVE
-            else
-                state = :UNKNOWN
-            end
-            info("Average weighted gap = $avg_gap, std gap = $std_gap, automatically determined contact state = $state")
-        end
-
-    end
-
-    # active / inactive node detection
-    for j in S
-        dofs = [2*(j-1)+1, 2*(j-1)+2]
-        weighted_gap[j] = g[dofs]
-
-        if length(la) != 0
-            p = dot(normals[j], la[dofs])
-            t = dot(tangents[j], la[dofs])
-            contact_pressure[j] = [p, t]
-        else
-            contact_pressure[j] = [0.0, 0.0]
-        end
-
+        p = dot(normals[j], la[j])
+        t = dot(tangents[j], la[j])
+        contact_pressure[j] = [p, t]
         complementarity_condition[j] = contact_pressure[j] - weighted_gap[j]
+    end
+
+    # Determine is node active or inactive, based on the normal direction
+    # complementarity condition
+    for j in S
         if complementarity_condition[j][1] < 0
             is_inactive[j] = 1
             is_active[j] = 0
@@ -345,23 +334,49 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
         end
     end
 
-    if (problem.properties.iteration == 1) && (state == :ACTIVE)
-        for j in S
-            is_inactive[j] = 0
-            is_active[j] = 1
-            is_slip[j] = 1
-            is_stick[j] = 0
+    # Special handling of first iteration: user can set contact state as
+    # :ACTIVE, :INACTIVE or :AUTO, and in last case contact state is
+    # determined automatically depending on the average gap distance
+
+    state = problem.properties.contact_state_in_first_iteration
+    if problem.properties.iteration == 1
+
+        info("First contact iteration, initial contact state = $state")
+
+        if state == :AUTO
+            avg_gap = round(mean([weighted_gap[j][1] for j in S]), 9)
+            std_gap = round(std([weighted_gap[j][1] for j in S]), 9)
+            if (avg_gap < 1.0e-6) && (std_gap < 1.0e-6)
+                state = :ACTIVE
+            else
+                state = :UNKNOWN
+            end
+            info("Average weighted gap = $avg_gap, std gap = $std_gap")
+            info("Automatically determined contact state to be $state")
         end
+
+        if state == :ACTIVE
+            for j in S
+                is_inactive[j] = 0
+                is_active[j] = 1
+                is_slip[j] = 1
+                is_stick[j] = 0
+            end
+        end
+
+        if state == :INACTIVE
+            for j in S
+                is_inactive[j] = 1
+                is_active[j] = 0
+                is_slip[j] = 0
+                is_stick[j] = 0
+            end
+        end
+
     end
 
-    if (problem.properties.iteration == 1) && (state == :INACTIVE)
-        for j in S
-            is_inactive[j] = 1
-            is_active[j] = 0
-            is_slip[j] = 0
-            is_stick[j] = 0
-        end
-    end
+    # User can add some keywords to `store_fields` to store contact state during
+    # iterations
 
     if "weighted gap" in props.store_fields
         update!(slave_elements, "weighted gap", time => weighted_gap)
@@ -387,23 +402,17 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
     info("# | A | I | St | Sl | gap | pres | comp")
     for j in S
-        str1 = "$j | $(is_active[j]) | $(is_inactive[j]) |  $(is_stick[j]) |  $(is_slip[j]) | "
-        str2 = "$(round(weighted_gap[j][1], 3)) | $(round(contact_pressure[j][1], 3)) | $(round(complementarity_condition[j][1], 3))"
-        info(str1 * str2)
+        rwc = round(weighted_gap[j][1], 3)
+        rcp = round(contact_pressure[j][1], 3)
+        rcc = round(complementarity_condition[j][1], 3)
+        isa = is_active[j]
+        isi = is_inactive[j]
+        ist = is_stick[j]
+        isl = is_slip[j]
+        info("$j | $isa | $isi |  $ist |  $isl | $rwc | $rcp | $rcc")
     end
 
     # solve variational inequality
-
-    # constitutive modelling in tangent direction, frictionless contact
-    for j in S
-        dofs = [2*(j-1)+1, 2*(j-1)+2]
-        if (is_active[j] == 1) && (is_slip[j] == 1)
-            info("$j is in active/slip, removing tangential constraint $(dofs[2])")
-            C2[dofs[2],:] = 0.0
-            g[dofs[2]] = 0.0
-            D[dofs[2], dofs] = tangents[j]
-        end
-    end
 
     # remove inactive nodes from assembly
     for j in S
@@ -417,9 +426,22 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
         end
     end
 
-    problem.assembly.C1 = C1
-    problem.assembly.C2 = C2
-    problem.assembly.D = D
-    problem.assembly.g = g
+    # constitutive modelling in tangent direction, frictionless contact
+
+    for j in S
+        dofs = [2*(j-1)+1, 2*(j-1)+2]
+        ndof, tdof = dofs
+        if (is_active[j] == 1) && (is_slip[j] == 1)
+            info("$j is in active + slip, removing tangential constraint $tdof")
+            C2[tdof,:] = 0.0
+            g[tdof = 0.0
+            D[tdof, dofs] = tangents[j]
+        end
+    end
+
+    problem.assembly.C1 = dropzeros(C1)
+    problem.assembly.C2 = dropzeros(C2)
+    problem.assembly.D = dropzeros(D)
+    problem.assembly.g = dropzeros(sparse(g))
 
 end

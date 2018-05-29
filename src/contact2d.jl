@@ -149,7 +149,7 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
         end
         la1 = slave_element("lambda", time)
         n1 = slave_element("normal", time)
-        t1 = [n1[2], -n1[1]]
+        t1 = slave_element("tangent", time)
 
         contact_area = 0.0
         contact_error = 0.0

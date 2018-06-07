@@ -8,11 +8,27 @@ type Contact2D <: BoundaryProblem
     max_distance :: Float64
     iteration :: Int
     contact_state_in_first_iteration :: Symbol
+    always_active :: Set{Int64}
+    always_inactive :: Set{Int64}
+    always_stick :: Set{Int64}
+    always_slip :: Set{Int64}
+    active_nodes :: Set{Int64}
+    inactive_nodes :: Set{Int64}
+    stick_nodes :: Set{Int64}
+    slip_nodes :: Set{Int64}
     store_fields :: Vector{String}
+    use_scaling :: Bool
+    alpha :: Dict{Int64, Float64}
+    beta :: Dict{Int64, Float64}
+    nadj_nodes :: Dict{Int64, Float64}
+    scaling_factors :: Dict{Int64, Float64}
 end
 
 function Contact2D()
-    return Contact2D([], false, true, Inf, 0, :AUTO, [])
+    return Contact2D([], false, true, Inf, 0, :AUTO,
+                    Set(), Set(), Set(), Set(),
+                    Set(), Set(), Set(), Set(),
+                    [], true, Dict(), Dict(), Dict(), Dict())
 end
 
 function FEMBase.add_elements!(::Problem{Contact2D}, ::Any)
@@ -50,6 +66,16 @@ function get_slave_dofs(problem::Problem{Contact2D})
         append!(dofs, get_gdofs(problem, element))
     end
     return sort(unique(dofs))
+end
+
+function get_slave_nodes(problem::Problem{Contact2D})
+    slave_nodes = Set{Int64}()
+    for element in get_slave_elements(problem)
+        for j in get_connectivity(element)
+            push!(slave_nodes, j)
+        end
+    end
+    return slave_nodes
 end
 
 function get_master_dofs(problem::Problem{Contact2D})
@@ -137,9 +163,22 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
     Rn = 0.0
 
+    alpha = empty!(problem.properties.alpha)
+    beta = empty!(problem.properties.beta)
+    nadj_nodes = empty!(problem.properties.nadj_nodes)
+
+    # starting situation is that all slave nodes in contact interface are active
+    # except nodes which are marked to be "always inactive"
+    S = get_slave_nodes(problem) # slave element nodes
+    props.active_nodes = setdiff(S, props.always_inactive)
+
     # 2. loop all slave elements
     for slave_element in slave_elements
-
+        slave_connectivity = get_connectivity(slave_element)
+        if all(j in props.always_inactive for j in slave_connectivity)
+            continue
+        end
+        sdofs = get_gdofs(problem, slave_element)
         nsl = length(slave_element)
         X1 = slave_element("geometry", time)
         x1 = slave_element("geometry", time)
@@ -158,7 +197,18 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
         master_elements = get_master_elements(problem)
         segmentation = create_contact_segmentation(problem, slave_element, master_elements, time)
         if length(segmentation) == 0 # no overlapping in master and slave surfaces with this slave element
+            setdiff!(props.active_nodes, get_connectivity(slave_element))
             continue
+        end
+
+        ae = zeros(nsl)
+        be = zeros(nsl)
+
+        for ip in get_integration_points(slave_element, 3)
+            detJ = slave_element(ip, time, Val{:detJ})
+            w = ip.weight * detJ
+            N1 = slave_element(ip, time)
+            ae += w*vec(N1)/detJ
         end
 
         Ae = eye(nsl)
@@ -174,9 +224,17 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
                     N1 = vec(get_basis(slave_element, xi_s, time))
                     De += w*diagm(N1)
                     Me += w*N1*N1'
+                    be += w*vec(N1)/detJ
                 end
-                Ae = De*inv(Me)
             end
+            Ae = De*inv(Me)
+            update!(slave_element, "dual basis coefficients", time => Ae)
+        end
+
+        for (i, j) in enumerate(get_connectivity(slave_element))
+            alpha[j] = get(alpha, j, 0.0) + ae[i]
+            beta[j] = get(beta, j, 0.0) + be[i]
+            nadj_nodes[j] = get(nadj_nodes, j, 0) + 1
         end
 
         # loop all segments
@@ -232,7 +290,6 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
                 Te += w*reshape(kron(N2, n_s, Phi), 2, 4)
                 He += w*reshape(kron(N1, t_s, Phi), 2, 4)
                 ge += w*Phi*dot(n_s, x_m-x_s)
-                ce += w*N1*dot(n_s, la_s)
                 Rn += w*dot(n_s, la_s)
 
                 contact_area += w
@@ -251,11 +308,10 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
             end
 
             # add contribution to contact constraints
-            add!(problem.assembly.C2, sdofs[1:field_dim:end], sdofs, Ne)
-            add!(problem.assembly.C2, sdofs[1:field_dim:end], mdofs, -Te)
-            add!(problem.assembly.D, sdofs[2:field_dim:end], sdofs, He)
-            add!(problem.assembly.g, sdofs[1:field_dim:end], ge)
-            add!(problem.assembly.c, sdofs[1:field_dim:end], ce)
+            add!(assembly.C2, sdofs[1:field_dim:end], sdofs, Ne)
+            add!(assembly.C2, sdofs[1:field_dim:end], mdofs, -Te)
+            add!(assembly.D, sdofs[2:field_dim:end], sdofs, He)
+            add!(assembly.g, sdofs[1:field_dim:end], ge)
 
         end # master elements done
 
@@ -269,151 +325,83 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
     end # slave elements done, contact virtual work ready
 
-    S = sort(collect(keys(normals))) # slave element nodes
-    weighted_gap = Dict{Int64, Vector{Float64}}()
-    contact_pressure = Dict{Int64, Vector{Float64}}()
-    complementarity_condition = Dict{Int64, Vector{Float64}}()
-    is_active = Dict{Int64, Int}()
-    is_inactive = Dict{Int64, Int}()
-    is_slip = Dict{Int64, Int}()
-    is_stick = Dict{Int64, Int}()
+    # Next, determine which nodes are active, which are inactive, which are
+    # sticking and which are slipping.
 
-    la = problem.assembly.la
-    # FIXME: for matrix operations, we need to know the dimensions of the
-    # final matrices
-    ndofs = 2*length(S)
-    ndofs = max(ndofs, length(la))
-    ndofs = max(ndofs, size(problem.assembly.K, 2))
-    ndofs = max(ndofs, size(problem.assembly.C1, 2))
-    ndofs = max(ndofs, size(problem.assembly.C2, 2))
-    ndofs = max(ndofs, size(problem.assembly.D, 2))
-    ndofs = max(ndofs, size(problem.assembly.g, 2))
-    ndofs = max(ndofs, size(problem.assembly.c, 2))
-
-    C1 = sparse(problem.assembly.C1, ndofs, ndofs)
-    C2 = sparse(problem.assembly.C2, ndofs, ndofs)
-    D = sparse(problem.assembly.D, ndofs, ndofs)
-    g = full(problem.assembly.g, ndofs, 1)
-    c = full(problem.assembly.c, ndofs, 1)
-
-    for j in S
-        dofs = [2*(j-1)+1, 2*(j-1)+2]
-        weighted_gap[j] = g[dofs]
+    union!(props.active_nodes, props.always_active)
+    if isempty(props.active_nodes) # No active nodes at all, we're done!
+        empty!(problem.assembly)
+        return nothing
     end
 
-    state = problem.properties.contact_state_in_first_iteration
-    if problem.properties.iteration == 1
-        info("First contact iteration, initial contact state = $state")
+    C1 = sparse(assembly.C1)
+    ndofs = maximum(size(C1))
+    C2 = sparse(assembly.C2, ndofs, ndofs)
+    D = sparse(assembly.D, ndofs, ndofs)
+    g = full(assembly.g, ndofs, 1)
 
-        if state == :AUTO
-            avg_gap = mean([weighted_gap[j][1] for j in S])
-            std_gap = std([weighted_gap[j][1] for j in S])
-            if (avg_gap < 1.0e-12) && (std_gap < 1.0e-12)
-                state = :ACTIVE
-            else
-                state = :UNKNOWN
+    # 1. if we are in first iteration, check that do we have planar surface.
+    # If have, calculate average and mean gap and set contact active if
+    # surfaces are "close enough". This helps with convergence issues if one
+    # of the bodies is missing Dirichlet boundary condition.
+    gaps = [g[2*(j-1)+1] for j in props.active_nodes]
+    avg_gap = mean(gaps)
+    std_gap = std(gaps)
+    if props.iteration == 1 &&
+            props.contact_state_in_first_iteration == :AUTO &&
+            !isempty(props.active_nodes) &&
+            avg_gap < 1.0e-2 &&
+            std_gap < 1.0e-3
+        info("Average weighted gap = $avg_gap, std gap = $std_gap.")
+        info("Looks that contact surfaces are planar and close each other.")
+        info("$(length(props.active_nodes)) nodes active.")
+    else # 2. Otherwise, check contact condition based on PDASS
+        la = problem("lambda", time)
+        for j in props.active_nodes
+            lan = dot(normals[j], get(la, j, zeros(2)))
+            if lan-g[2*(j-1)+1] < 0
+                setdiff!(props.active_nodes, j)
             end
-            info("Average weighted gap = $avg_gap, std gap = $std_gap, automatically determined contact state = $state")
-        end
-
-    end
-
-    # active / inactive node detection
-    for j in S
-        dofs = [2*(j-1)+1, 2*(j-1)+2]
-        weighted_gap[j] = g[dofs]
-
-        if length(la) != 0
-            p = dot(normals[j], la[dofs])
-            t = dot(tangents[j], la[dofs])
-            contact_pressure[j] = [p, t]
-        else
-            contact_pressure[j] = [0.0, 0.0]
-        end
-
-        complementarity_condition[j] = contact_pressure[j] - weighted_gap[j]
-        if complementarity_condition[j][1] < 0
-            is_inactive[j] = 1
-            is_active[j] = 0
-            is_slip[j] = 0
-            is_stick[j] = 0
-        else
-            is_inactive[j] = 0
-            is_active[j] = 1
-            is_slip[j] = 1
-            is_stick[j] = 0
         end
     end
 
-    if (problem.properties.iteration == 1) && (state == :ACTIVE)
-        for j in S
-            is_inactive[j] = 0
-            is_active[j] = 1
-            is_slip[j] = 1
-            is_stick[j] = 0
-        end
-    end
+    # 3. Determine tangential direction for the active nodes
+    props.slip_nodes = setdiff(props.active_nodes, props.always_stick)
 
-    if (problem.properties.iteration == 1) && (state == :INACTIVE)
-        for j in S
-            is_inactive[j] = 1
-            is_active[j] = 0
-            is_slip[j] = 0
-            is_stick[j] = 0
-        end
-    end
-
-    if "weighted gap" in props.store_fields
-        update!(slave_elements, "weighted gap", time => weighted_gap)
-    end
-    if "contact pressure" in props.store_fields
-        update!(slave_elements, "contact pressure", time => contact_pressure)
-    end
-    if "complementarity condition" in props.store_fields
-        update!(slave_elements, "complementarity condition", time => complementarity_condition)
-    end
-    if "active nodes" in props.store_fields
-        update!(slave_elements, "active nodes", time => is_active)
-    end
-    if "inactive nodes" in props.store_fields
-        update!(slave_elements, "inactive nodes", time => is_inactive)
-    end
-    if "stick nodes" in props.store_fields
-        update!(slave_elements, "stick nodes", time => is_stick)
-    end
-    if "slip nodes" in props.store_fields
-        update!(slave_elements, "slip nodes", time => is_slip)
-    end
-
-    info("# | A | I | St | Sl | gap | pres | comp")
-    for j in S
-        str1 = "$j | $(is_active[j]) | $(is_inactive[j]) |  $(is_stick[j]) |  $(is_slip[j]) | "
-        str2 = "$(round(weighted_gap[j][1], 3)) | $(round(contact_pressure[j][1], 3)) | $(round(complementarity_condition[j][1], 3))"
-        info(str1 * str2)
-    end
+    info("active nodes: $(props.active_nodes)")
 
     # solve variational inequality
 
-    # constitutive modelling in tangent direction, frictionless contact
-    for j in S
+    props.inactive_nodes = setdiff(S, props.active_nodes)
+    props.stick_nodes = setdiff(props.active_nodes, props.slip_nodes)
+
+    # remove all inactive nodes from assembly
+    for j in setdiff(S, props.active_nodes)
         dofs = [2*(j-1)+1, 2*(j-1)+2]
-        if (is_active[j] == 1) && (is_slip[j] == 1)
-            info("$j is in active/slip, removing tangential constraint $(dofs[2])")
-            C2[dofs[2],:] = 0.0
-            g[dofs[2]] = 0.0
-            D[dofs[2], dofs] = tangents[j]
-        end
+        info("Node $j is inactive, removing dofs $dofs")
+        C1[dofs,:] = 0.0
+        C2[dofs,:] = 0.0
+        D[dofs,:] = 0.0
+        g[dofs,:] = 0.0
     end
 
-    # remove inactive nodes from assembly
-    for j in S
+    for j in props.slip_nodes
         dofs = [2*(j-1)+1, 2*(j-1)+2]
-        if is_inactive[j] == 1
-            info("$j is inactive, removing dofs $dofs")
-            C1[dofs,:] = 0.0
-            C2[dofs,:] = 0.0
-            D[dofs,:] = 0.0
-            g[dofs,:] = 0.0
+        info("Node $j is slipping, removing tangential constraint $(dofs[2])")
+        C2[dofs[2],:] = 0.0
+        g[dofs[2]] = 0.0
+        D[dofs[2], dofs] = tangents[j]
+    end
+
+    if problem.properties.use_scaling
+        scaling = empty!(problem.properties.scaling_factors)
+        for j in props.active_nodes
+            dofs = [2*(j-1)+1, 2*(j-1)+2]
+            isapprox(beta[j], 0.0) && continue
+            scaling[j] = alpha[j] / beta[j]
+            C1[dofs,:] *= scaling[j]
+            C2[dofs[1],:] *= scaling[j]
+            g[dofs[1]] *= scaling[j]
         end
     end
 

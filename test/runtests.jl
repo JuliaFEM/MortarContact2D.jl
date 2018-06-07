@@ -26,4 +26,7 @@ using Base.Test
         include("test_contact_segmentation.jl")
     end
 
+    @testset "Test scaling factor" begin
+        include("test_scaling_factor.jl")
+    end
 end

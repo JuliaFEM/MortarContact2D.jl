@@ -100,6 +100,14 @@ assemble!(problem, 0.0)
 @test isempty(full(problem.assembly.f))
 @test isempty(full(problem.assembly.g))
 
+# put all nodes inactive
+problem.properties.always_inactive = Set([1, 2])
+empty!(problem.assembly)
+assemble!(problem, 1.0)
+@test isempty(problem.assembly.C1)
+@test isempty(problem.assembly.C2)
+
+empty!(problem.properties.always_inactive)
 empty!(problem.assembly)
 assemble!(problem, 1.0)
 @test isempty(full(problem.assembly.K))

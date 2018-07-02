@@ -1,7 +1,7 @@
 # This file is a part of JuliaFEM.
 # License is MIT: see https://github.com/JuliaFEM/MortarContact2D.jl/blob/master/LICENSE
 
-type Contact2D <: BoundaryProblem
+mutable struct Contact2D <: BoundaryProblem
     master_elements :: Vector{Element}
     rotate_normals :: Bool
     dual_basis :: Bool

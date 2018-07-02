@@ -3,7 +3,7 @@
 
 const MortarElements2D = Union{Seg2,Seg3}
 
-type Mortar2D <: BoundaryProblem
+mutable struct Mortar2D <: BoundaryProblem
     master_elements :: Vector{Element}
 end
 

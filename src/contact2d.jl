@@ -161,7 +161,7 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
             continue
         end
 
-        Ae = eye(nsl)
+        Ae = Matrix(I, nsl, nsl)
         if props.dual_basis
             De = zeros(nsl, nsl)
             Me = zeros(nsl, nsl)
@@ -172,7 +172,7 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
                     xi = ip.coords[1]
                     xi_s = dot([1/2*(1-xi); 1/2*(1+xi)], xi1)
                     N1 = vec(get_basis(slave_element, xi_s, time))
-                    De += w*diagm(N1)
+                    De += w*Matrix(Diagonal(N1))
                     Me += w*N1*N1'
                 end
                 Ae = De*inv(Me)
@@ -293,8 +293,8 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
     C1 = sparse(problem.assembly.C1, ndofs, ndofs)
     C2 = sparse(problem.assembly.C2, ndofs, ndofs)
     D = sparse(problem.assembly.D, ndofs, ndofs)
-    g = full(problem.assembly.g, ndofs, 1)
-    c = full(problem.assembly.c, ndofs, 1)
+    g = Vector(sparse(problem.assembly.g, ndofs, 1)[:])
+    c = Vector(sparse(problem.assembly.c, ndofs, 1)[:])
 
     for j in S
         dofs = [2*(j-1)+1, 2*(j-1)+2]
@@ -303,7 +303,7 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
 
     state = problem.properties.contact_state_in_first_iteration
     if problem.properties.iteration == 1
-        info("First contact iteration, initial contact state = $state")
+        @info("First contact iteration, initial contact state = $state")
 
         if state == :AUTO
             avg_gap = mean([weighted_gap[j][1] for j in S])
@@ -313,7 +313,7 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
             else
                 state = :UNKNOWN
             end
-            info("Average weighted gap = $avg_gap, std gap = $std_gap, automatically determined contact state = $state")
+            @info("Average weighted gap = $avg_gap, std gap = $std_gap, automatically determined contact state = $state")
         end
 
     end
@@ -385,41 +385,36 @@ function FEMBase.assemble_elements!(problem::Problem{Contact2D}, assembly::Assem
         update!(slave_elements, "slip nodes", time => is_slip)
     end
 
-    info("# | A | I | St | Sl | gap | pres | comp")
+    @info("# | A | I | St | Sl | gap | pres | comp")
     for j in S
         str1 = "$j | $(is_active[j]) | $(is_inactive[j]) |  $(is_stick[j]) |  $(is_slip[j]) | "
-        str2 = "$(round(weighted_gap[j][1], 3)) | $(round(contact_pressure[j][1], 3)) | $(round(complementarity_condition[j][1], 3))"
-        info(str1 * str2)
+        str2 = "$(round(weighted_gap[j][1]; digits=3)) | $(round(contact_pressure[j][1]; digits=3)) | $(round(complementarity_condition[j][1]; digits=3))"
+        @info(str1 * str2)
     end
 
     # solve variational inequality
 
-    # constitutive modelling in tangent direction, frictionless contact
-    for j in S
-        dofs = [2*(j-1)+1, 2*(j-1)+2]
-        if (is_active[j] == 1) && (is_slip[j] == 1)
-            info("$j is in active/slip, removing tangential constraint $(dofs[2])")
-            C2[dofs[2],:] = 0.0
-            g[dofs[2]] = 0.0
-            D[dofs[2], dofs] = tangents[j]
-        end
-    end
-
     # remove inactive nodes from assembly
     for j in S
         dofs = [2*(j-1)+1, 2*(j-1)+2]
+        n, t = dofs
         if is_inactive[j] == 1
-            info("$j is inactive, removing dofs $dofs")
-            C1[dofs,:] = 0.0
-            C2[dofs,:] = 0.0
-            D[dofs,:] = 0.0
-            g[dofs,:] = 0.0
+            @debug("$j is inactive, removing dofs $dofs")
+            C1[dofs,:] .= 0.0
+            C2[dofs,:] .= 0.0
+            D[dofs,:] .= 0.0
+            g[dofs,:] .= 0.0
+        elseif (is_active[j] == 1) && (is_slip[j] == 1)
+            @debug("$j is in active/slip, removing tangential constraint $t")
+            C2[t,:] .= 0.0
+            g[t] = 0.0
+            D[t, dofs] .= tangents[j]
         end
     end
 
     problem.assembly.C1 = C1
     problem.assembly.C2 = C2
     problem.assembly.D = D
-    problem.assembly.g = g
+    problem.assembly.g = sparsevec(g)
 
 end

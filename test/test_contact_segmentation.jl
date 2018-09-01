@@ -1,10 +1,8 @@
 # This file is a part of JuliaFEM.
 # License is MIT: see https://github.com/JuliaFEM/MortarContact2D.jl/blob/master/LICENSE
 
-using MortarContact2D
+using FEMBase, MortarContact2D, Test
 using MortarContact2D: create_contact_segmentation, calculate_normals
-
-using FEMBase.Test
 
 X = Dict(1 => [0.0, 0.0],
          2 => [1.0, 0.0],

@@ -4,8 +4,7 @@
 # Construct discrete coupling operator between two elements and eliminate
 # boundary conditions from global matrix assembly. Thesis, p. 73.
 
-using MortarContact2D
-using Base.Test
+using FEMBase, MortarContact2D, Test
 
 X = Dict(
     1 => [1.0, 2.0],

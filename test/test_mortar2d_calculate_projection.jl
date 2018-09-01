@@ -1,12 +1,10 @@
 # This file is a part of JuliaFEM.
 # License is MIT: see https://github.com/JuliaFEM/MortarContact2D.jl/blob/master/LICENSE
 
-using MortarContact2D
+using FEMBase, MortarContact2D, Test
 using MortarContact2D: calculate_normals,
                        project_from_master_to_slave,
                        project_from_slave_to_master
-
-using Base.Test
 
 X = Dict(
     1 => [0.0, 1.0],

@@ -1,9 +1,8 @@
 # This file is a part of JuliaFEM.
 # License is MIT: see https://github.com/JuliaFEM/MortarContact2D.jl/blob/master/LICENSE
 
-using MortarContact2D
+using FEMBase, MortarContact2D, Test
 using MortarContact2D: get_slave_dofs, get_master_dofs
-using Base.Test
 
 # Original problem:
 #
@@ -83,6 +82,11 @@ update!(master, "geometry", ([1.0, 0.6], [0.0, 0.6]))
 update!(master, "displacement", 0.0 => (zeros(2), zeros(2)))
 update!(master, "displacement", 1.0 => ([-0.18125, -0.15], [-0.21875, -0.15]))
 problem = Problem(Contact2D, "LOWER_TO_UPPER", 2, "displacement")
+push!(problem.properties.store_fields, "complementarity condition")
+push!(problem.properties.store_fields, "active nodes")
+push!(problem.properties.store_fields, "inactive nodes")
+push!(problem.properties.store_fields, "stick nodes")
+push!(problem.properties.store_fields, "slip nodes")
 add_slave_elements!(problem, [slave])
 add_master_elements!(problem, [master])
 um = master("displacement", (0.0,), 1.0)
@@ -93,21 +97,21 @@ la = slave("lambda", (0.0,), 1.0)
 @test isapprox(la, [0.0, 30.375])
 
 assemble!(problem, 0.0)
-@test isempty(full(problem.assembly.K))
-@test isempty(full(problem.assembly.C1))
-@test isempty(full(problem.assembly.C2))
-@test isempty(full(problem.assembly.D))
-@test isempty(full(problem.assembly.f))
-@test isempty(full(problem.assembly.g))
+@test iszero(sparse(problem.assembly.K))
+@test iszero(sparse(problem.assembly.C1))
+@test iszero(sparse(problem.assembly.C2))
+@test iszero(sparse(problem.assembly.D))
+@test iszero(sparse(problem.assembly.f))
+@test iszero(sparse(problem.assembly.g))
 
 empty!(problem.assembly)
 assemble!(problem, 1.0)
-@test isempty(full(problem.assembly.K))
-@test isempty(full(problem.assembly.f))
-C1 = full(problem.assembly.C1, 4, 8)
-C2 = full(problem.assembly.C2, 4, 8)
-D = full(problem.assembly.D, 4, 8)
-g = full(problem.assembly.g, 4, 1)
+@test iszero(sparse(problem.assembly.K))
+@test iszero(sparse(problem.assembly.f))
+C1 = Matrix(sparse(problem.assembly.C1, 4, 8))
+C2 = Matrix(sparse(problem.assembly.C2, 4, 8))
+D = Matrix(sparse(problem.assembly.D, 4, 8))
+g = Vector(sparse(problem.assembly.g, 4, 1)[:])
 C1_expected = [
     0.5  0.0  0.0  0.0   0.0   0.0  -0.5   0.0
     0.0  0.5  0.0  0.0   0.0   0.0   0.0  -0.5

@@ -11,8 +11,8 @@ function Mortar2D()
     return Mortar2D([])
 end
 
-function FEMBase.add_elements!(::Problem{Mortar2D}, ::Any)
-    error("use `add_slave_elements!` and `add_master_elements!` to add ",
+function FEMBase.add_elements!(::Problem{Mortar2D}, ::Union{Tuple, Vector})
+    error("use `add_slave_elements!` and `add_master_elements!` to add " *
           "elements to the Mortar2D problem.")
 end
 
@@ -79,19 +79,19 @@ function project_from_master_to_slave(slave_element::Element{E}, x2, time;
     midpnt = mean(x1_)
     dist = norm(midpnt - x2)
     distval = dist/len
-    info("Projection from the master element to the slave failed.")
-    info("Arguments:")
-    info("Time: $time")
-    info("Point to project to the slave element: (x2): $x2")
-    info("Slave element geometry (x1): $x1_")
-    info("Slave element normal direction (n1): $n1_")
-    info("Midpoint of slave element: $midpnt")
-    info("Length of slave element: $len")
-    info("Distance between midpoint of slave element and x2: $dist")
-    info("Distance/Lenght-ratio: $distval")
-    info("Number of iterations: $max_iterations")
-    info("Wanted convergence tolerance: $tol")
-    info("Achieved convergence tolerance: $(norm(dxi1))")
+    @info("Projection from the master element to the slave failed.")
+    @info("Arguments:")
+    @info("Time: $time")
+    @info("Point to project to the slave element: (x2): $x2")
+    @info("Slave element geometry (x1): $x1_")
+    @info("Slave element normal direction (n1): $n1_")
+    @info("Midpoint of slave element: $midpnt")
+    @info("Length of slave element: $len")
+    @info("Distance between midpoint of slave element and x2: $dist")
+    @info("Distance/Lenght-ratio: $distval")
+    @info("Number of iterations: $max_iterations")
+    @info("Wanted convergence tolerance: $tol")
+    @info("Achieved convergence tolerance: $(norm(dxi1))")
     error("Failed to project point to slave surface in $max_iterations.")
 end
 
@@ -234,7 +234,7 @@ function get_mortar_matrix_P(problem::Problem{Mortar2D})
     C2 = sparse(problem.assembly.C2)
     D_ = C2[s,s]
     M_ = -C2[s,m]
-    P = ldltfact(1/2*(D_ + D_')) \ M_
+    P = cholesky(1/2*(D_ + D_')) \ M_
     return P
 end
 
@@ -246,12 +246,12 @@ function FEMBase.eliminate_boundary_conditions!(problem::Problem{Mortar2D}, K, M
     P = get_mortar_matrix_P(problem)
     ndim = size(K, 1)
     Id = ones(ndim)
-    Id[s] = 0.0
-    Q = spdiagm(Id)
-    Q[m,s] += P'
-    K[:,:] = Q*K*Q'
-    M[:,:] = Q*M*Q'
-    f[:] = Q*f
+    Id[s] .= 0.0
+    Q = sparse(Diagonal(Id))
+    Q[m,s] .+= P'
+    K[:,:] .= Q*K*Q'
+    M[:,:] .= Q*M*Q'
+    f[:] .= Q*f
 
     return true
 end

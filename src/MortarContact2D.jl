@@ -12,8 +12,7 @@
 """
 module MortarContact2D
 
-using Reexport
-@reexport using FEMBase
+using FEMBase, SparseArrays, LinearAlgebra, Statistics
 
 include("mortar2d.jl")
 include("contact2d.jl")

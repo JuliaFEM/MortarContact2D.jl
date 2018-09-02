@@ -1,10 +1,11 @@
 # This file is a part of JuliaFEM.
 # License is MIT: see https://github.com/JuliaFEM/MortarContact2D.jl/blob/master/LICENSE
 
-using MortarContact2D
-using Base.Test
+using FEMBase, MortarContact2D, Test, SparseArrays, LinearAlgebra, Statistics
 
-@testset "test MortarContact2D.jl" begin
+include(joinpath("..", "docs", "make.jl"))
+
+@testset "MortarContact2D.jl" begin
 
     @testset "Projecting vertices between surfaces" begin
         include("test_mortar2d_calculate_projection.jl")
@@ -27,3 +28,5 @@ using Base.Test
     end
 
 end
+
+include(joinpath("..", "docs", "deploy.jl"))

@@ -3,11 +3,10 @@
 
 # Simple coupling interface of four elements
 
-using MortarContact2D
+using FEMBase, MortarContact2D, Test
 using MortarContact2D: get_slave_dofs, get_master_dofs,
                        get_mortar_matrix_D, get_mortar_matrix_M,
                        get_mortar_matrix_P
-using Base.Test
 
 # Slave side coordinates:
 Xs = Dict(
@@ -54,6 +53,6 @@ P_expected = 1/320*[329 -24 15; 46 304 -30; -21 56 285]
 
 # Results:
 
-@test isapprox(full(D), D_expected)
-@test isapprox(full(M), M_expected)
-@test isapprox(full(P), P_expected)
+@test isapprox(D, D_expected)
+@test isapprox(M, M_expected)
+@test isapprox(P, P_expected)

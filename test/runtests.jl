@@ -3,8 +3,6 @@
 
 using FEMBase, MortarContact2D, Test, SparseArrays, LinearAlgebra, Statistics
 
-include(joinpath("..", "docs", "make.jl"))
-
 @testset "MortarContact2D.jl" begin
 
     @testset "Projecting vertices between surfaces" begin
@@ -28,5 +26,3 @@ include(joinpath("..", "docs", "make.jl"))
     end
 
 end
-
-include(joinpath("..", "docs", "deploy.jl"))
